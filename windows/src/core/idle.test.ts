@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { InputSense, isSleepy } from './idle.ts';
+import { InputSense, isSleepy, tickDelta } from './idle.ts';
 
 test('sleep needs either a long night idle or a very long idle', () => {
   // Environment.swift + main.swift:774
@@ -57,4 +57,76 @@ test('the typing level rises and decays smoothly', () => {
   for (let i = 0; i < 60; i++) out = s.sample(tick, tick + 1000 * i, { x: 0, y: 0 });
   assert.ok(out.typing < 0.2, `typing should decay, got ${out.typing}`);
   assert.ok(out.typing >= 0);
+});
+
+// --- 32-bit tick wrap ------------------------------------------------------
+// GetTickCount and LASTINPUTINFO.dwTime are unsigned 32-bit millisecond
+// counters: they wrap to zero roughly every 49.7 days. Plain subtraction goes
+// NEGATIVE across a wrap, which broke sleep and typing detection on
+// long-uptime machines. Reported in review.
+const UINT32 = 4294967296;
+
+test('tickDelta uses unsigned-32 wrap semantics for Win32-range ticks', () => {
+  assert.equal(tickDelta(5000, 1000), 4000);
+  // last input 300 ms before the wrap, now 5000 ms after it: 5300 ms elapsed
+  assert.equal(tickDelta(5000, UINT32 - 300), 5300);
+  // the instant of the wrap itself
+  assert.equal(tickDelta(0, UINT32 - 1), 1);
+  assert.equal(tickDelta(0, 0), 0);
+});
+
+test('tickDelta falls back to plain subtraction for Date.now() values', () => {
+  // The win32 layer degrades to Date.now() when the FFI is unavailable, and
+  // those values are far beyond 2^32, so wrap arithmetic must not apply.
+  const now = Date.now();
+  assert.ok(now > UINT32, 'Date.now() should be outside the uint32 range');
+  assert.equal(tickDelta(now, now - 4500), 4500);
+  // a backwards system clock must not become a 49-day delta
+  assert.equal(tickDelta(now - 1000, now), -1000);
+});
+
+test('idle seconds survive a tick wrap instead of collapsing to zero', () => {
+  // Before the fix this read 0, so a machine idle across the wrap would never
+  // fall asleep until the next keypress.
+  const s = new InputSense();
+  const out = s.sample(UINT32 - 300, 5000, { x: 0, y: 0 });
+  assert.ok(Math.abs(out.idleSeconds - 5.3) < 1e-9,
+    `idle ${out.idleSeconds}s across a wrap, expected 5.3`);
+  assert.equal(isSleepy(out.idleSeconds, 23), false, '5.3 s is not sleepy');
+});
+
+test('a long idle across a wrap is still recognised as sleepy', () => {
+  const s = new InputSense();
+  // last input 20 minutes before the wrap, now 5 minutes after it
+  const out = s.sample(UINT32 - 20 * 60_000, 5 * 60_000, { x: 0, y: 0 });
+  assert.ok(Math.abs(out.idleSeconds - 25 * 60) < 1e-6,
+    `idle ${out.idleSeconds}s, expected 1500`);
+  assert.equal(isSleepy(out.idleSeconds, 23), true);
+});
+
+test('typing is still detected when the input tick wraps backwards', () => {
+  const s = new InputSense();
+  // prime just before the wrap
+  s.sample(UINT32 - 300, UINT32 - 200, { x: 10, y: 10 });
+  // the user types 200 ms after the wrap: dwTime is now SMALLER than before
+  const out = s.sample(200, 250, { x: 10, y: 10 });
+  assert.equal(out.keyboardActive, true,
+    'input after a wrap must count as input');
+  assert.ok(out.typing > 0);
+});
+
+test('an unchanged input tick is never mistaken for input', () => {
+  const s = new InputSense();
+  s.sample(UINT32 - 300, UINT32 - 200, { x: 0, y: 0 });
+  const out = s.sample(UINT32 - 300, UINT32 - 100, { x: 0, y: 0 });
+  assert.equal(out.keyboardActive, false);
+});
+
+test('mixed clock domains report no elapsed time rather than guessing', () => {
+  // If GetTickCount ever fails while GetLastInputInfo keeps working, one operand
+  // is a uint32 tick and the other a Date.now() value. Wrap arithmetic is wrong
+  // and so is plain subtraction (it would read as ~55 years of idleness and put
+  // the fly to sleep instantly). Report 0: staying awake is the safe direction.
+  assert.equal(tickDelta(Date.now(), 5000), 0);
+  assert.equal(tickDelta(5000, Date.now()), 0);
 });

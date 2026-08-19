@@ -73,6 +73,11 @@ subtree is the Electron/TypeScript port and IS verifiable here:
 - koffi's `.d.ts` omits `proto`/`register`/`unregister`/`address` though all exist
   at runtime, and `register()` needs `pointer(proto)`, not the bare proto.
   `LASTINPUTINFO` must be declared `_Inout_` or `dwTime` comes back 0.
+- `GetTickCount()` and `LASTINPUTINFO.dwTime` are **unsigned 32-bit** ms counters
+  that wrap every ~49.7 days. Subtract them with `core/idle.ts`'s `tickDelta`,
+  never with `-`: plain subtraction goes negative across a wrap, which clamped
+  idle to 0 (so a machine idle across the wrap never slept) and made the first
+  input after a wrap look like no input at all.
 - Window ids must be **HWNDs**: with array indices every poll reports every
   window as newly appeared, and ledge tracking breaks.
 - Both windows must share one always-on-top band, or the full-screen overlay pins
