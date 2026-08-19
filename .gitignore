@@ -3,3 +3,11 @@ DesktopFly
 *.log
 nohup.out
 /*.png
+
+# Windows port
+windows/node_modules/
+windows/dist/
+windows/*.png
+windows/*.log
+windows/*.txt
+windows/release/

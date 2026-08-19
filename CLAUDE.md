@@ -1,4 +1,6 @@
-# DesktopFly — agent notes
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 A 3D fruit fly on a transparent macOS overlay, behavior-driven by a 1 kHz
 leaky-integrate-and-fire (LIF) simulation of a 668-neuron circuit extracted
@@ -16,6 +18,7 @@ SceneKit; the brain data is real.
 | `Environment.swift` | permission-free senses: `WindowSense` (ledges/looms), circadian curve, user idle, thermal tempo |
 | `etl.py` | raw Codex dumps → `data/brain_points.json` + `data/circuit.json` |
 | `data/` | shipped derived data (CC BY-NC 4.0 — see `data/DATA_LICENSE.md`) |
+| `windows/` | Electron + TypeScript + Three.js port, feature-complete: `src/core` the sim, sense rules, arena and picking, `src/body` the body + `Fly` + `Coordinator`, `src/main` the Electron shell + tray + `win32.ts` (koffi FFI), `src/renderer` the overlay and brain renderers, `src/cli` the suites, `assets/` the tray icon (design: `docs/superpowers/specs/2026-08-19-windows-port-design.md`) |
 
 ## Build, run, verify
 
@@ -29,9 +32,84 @@ SceneKit; the brain data is real.
 ```
 
 Always run **both** suites after any change; they are the ground truth.
-Key invariants: GF silent over 4 s of rest, GF fires ≤ ~10 ms after abrupt
-loom, walk-drive duty 20–50%, siesta (scale 0.84) walk-drive > 3%,
-no per-frame scale/z snap at landing.
+Both binaries locate `data/` next to the executable or in the cwd
+(`findDataDir`) — run them from the repo root or they exit "no data/".
+`DESKTOPFLY_FPS=1 ./DesktopFly` logs frame rate to stderr every 5 s.
+
+`--simtest` exits non-zero only on these five (`main.swift:223`): zero GF
+spikes over 4 s of rest · ≥1 GF spike during an abrupt loom · walk-drive
+crosses its threshold at least once in 20 s · GF-cluster click stimulation
+produces a spike · siesta (activityScale 0.84) walk-drive duty > 3%.
+Everything else it prints — loom→GF latency (~4 ms), LC/DNa/pop rates,
+left-eye steering diff, air-puff GF count — is a **diagnostic, not an
+assertion**: read the numbers, don't rely on the exit code to catch a drift
+in them. `--behaviortest` is 17 hard checks (7 stimulate-the-sim scenarios +
+10 hand-built-signal body checks, incl. no per-frame scale/z snap at landing).
+
+**Platform**: two targets share `data/`. The root Swift build is macOS-only
+(Cocoa/SceneKit, bare `swiftc`, macOS 13+) and cannot be built or tested on
+Windows — say so plainly rather than implying its suites passed. The `windows/`
+subtree is the Electron/TypeScript port and IS verifiable here:
+`cd windows && node --test && npm run simtest:strict && npm run behaviortest`.
+`etl.py` and the
+`data/*.json` invariants are checkable on either platform.
+
+**Windows port gotchas** (each cost real debugging time):
+- `THREE.Color(r, g, b)` reads its arguments as **linear**-sRGB; the Swift
+  `NSColor(calibratedRed:)` values are sRGB. Convert with
+  `setRGB(..., THREE.SRGBColorSpace)` or the whole fly washes out.
+- `import.meta.url` is undefined in esbuild's CommonJS output, so anything
+  resolving paths from it must also handle `__dirname`.
+- Main must not *push* startup data to the renderer on `did-finish-load`: the
+  renderer subscribes after that fires. Use `invoke`/`handle`.
+- A GUI Electron process on Windows has no usable stdout — renderer errors go to
+  `windows/renderer.log`, and `capturePage()` on a *visible* window needs an
+  interactive desktop surface (use a hidden window to capture headlessly).
+- `backgroundThrottling: false` is load-bearing: the sim clock runs off
+  `requestAnimationFrame`, which Chromium throttles to ~1 Hz when occluded.
+- **Native modules must be `external` in esbuild**, never bundled — `koffi`
+  included. Bundling it rewrote its own `createRequire(import.meta.url)` and hung
+  the app at load.
+- koffi's `.d.ts` omits `proto`/`register`/`unregister`/`address` though all exist
+  at runtime, and `register()` needs `pointer(proto)`, not the bare proto.
+  `LASTINPUTINFO` must be declared `_Inout_` or `dwTime` comes back 0.
+- `GetTickCount()` and `LASTINPUTINFO.dwTime` are **unsigned 32-bit** ms counters
+  that wrap every ~49.7 days. Subtract them with `core/idle.ts`'s `tickDelta`,
+  never with `-`: plain subtraction goes negative across a wrap, which clamped
+  idle to 0 (so a machine idle across the wrap never slept) and made the first
+  input after a wrap look like no input at all.
+- Window ids must be **HWNDs, carried as strings**: with array indices every poll
+  reports every window as newly appeared, and `Number(koffi.address(hwnd))` would
+  lose precision above 2^53-1 (real HWNDs are 32-bit significant, so that is
+  latent, not live). Ids are equality-only, so `handleId()` keeps them exact.
+- Both windows must share one always-on-top band, or the full-screen overlay pins
+  the brain window beneath it. This machine has 31 topmost windows, so ordering
+  inside the band drifts; always-on-top is re-asserted on the window poll because
+  Windows silently strips it for full-screen apps.
+- Pause must reset the sim clock, not lean on the dt clamp: 50 ms of catch-up is
+  still a visible jump.
+- Packaging: `electron` must sit in devDependencies (electron-builder supplies the
+  runtime), `koffi` must be `asarUnpack`ed (a `.node` cannot load from an asar),
+  and `findDataDir` probes `process.resourcesPath` because a packaged app has no
+  repo above it.
+
+**Windows port architecture** (differs from macOS in two deliberate ways):
+- **The sim lives in the overlay renderer**, not main. Spikes travel overlay →
+  main → brain window and stimulation travels back, so only visuals cross IPC —
+  the LC→GF escape race, where 4 ms decides the outcome, never does. Do not move
+  the sim to main "for tidiness".
+- **The overlay spans every display**, where macOS keeps one screen and hops on
+  command. The window is the bounding box; `core/arena.ts` confines the fly to the
+  union of the real monitor rectangles, because offset monitors of different sizes
+  leave parts of that box on no display. Point sizing in the brain window must be
+  **screen-space** (`sizeAttenuation: false`), matching SceneKit's
+  min/maxPointScreenSpaceRadius, or the 23k-point cloud reads as dim dust.
+
+**Caveat on the walk-duty invariant**: "walk-drive duty 20–50%" is a typical
+run, not a bound. The 330 partner neurons draw random baselines that set the
+drive onto DNp09, so duty spans ~17–43% across RNG seeds (measured in the
+Windows port, which can pin the seed; the Swift build reshuffles it every run).
+Treat a single low reading as normal variance, not a regression.
 
 **SourceKit note**: the IDE reports "Cannot find type ..." across files —
 false positives. The five .swift files compile as one module via build.sh;
@@ -46,6 +124,56 @@ trust the compiler, not single-file diagnostics.
   click monitor — these only call enqueue/setters.
 - Brain window has its own render delegate; spikes cross via `SpikeBus` (locked).
 - `LIFSim.stimulate()` is thread-safe (pending list merged at `step()`).
+
+## Frame contract (`Coordinator.renderer`, main.swift:632)
+
+The one place the body↔brain loop closes; read it top-to-bottom before changing
+any sense or signal.
+
+1. **senses → sim inputs** — `loomL/loomR` = max(cursor loom, exponentially
+   decaying window loom); `airPuff` = max(cursor whoosh, `typingLevel × 0.30`);
+   `gaitDrive`/`gaitPhase` = fly #1's `walkingIntensity`/`gaitPhasePublic`
+   (body→brain proprioception, injected onto ascending neurons with per-neuron
+   phase offsets); `activityScale` = `(1 − (1−activity)×0.35) × (sleepy ? 0.75 : 1)`;
+   `sensoryGate` = 0.55 asleep. `computeLoom` (radial approach ÷ distance,
+   split between eyes by bearing sign) is the last non-connectome step —
+   everything downstream of LC4/LPLC2 is real wiring.
+2. **fixed 1 kHz stepping** — `msAccumulator` turns frame dt into whole
+   milliseconds, clamped to 50 per frame, so the sim never chases a stalled
+   render thread. `sim.simMs` therefore drifts behind wall time after a hitch.
+3. **rates → commands** — `SignalBuilder.make`, shared verbatim with
+   `--behaviortest` (that's what makes the suite meaningful).
+4. **commands → body** — `fly.update(...)`: fly #1 gets `signals`, the rest `nil`.
+
+`SignalBuilder` normalizations — change a divisor and every threshold in
+`brainBehavior` shifts with it:
+
+| signal | formula | clamp |
+|---|---|---|
+| `escape` | `consumeGF()` — latch, drained once per frame | bool |
+| `nervous` | `rateLoom / 80` | 0…1 |
+| `turnBias` | `(rateDNaL − rateDNaR − 8 s EMA baseline) × 0.04` | ±1 |
+| `walkDrive` | `rateFwd / 10` | 0…1.3 |
+| `groomDrive` | `rateGroom / 8` | **none** — add one if you touch it |
+| `wingDrive` | `rateEscW / 10` | 0…1.3 |
+| `arousal` | `ratePop / 20` | 0…1 |
+| `backward` | `rateMDN > 8` | bool |
+
+`tempo` and `sleep` are set by the coordinator afterwards, not by the sim.
+
+## Body state machine (`FlyModel.swift`)
+
+`State = walking | idle | grooming | flying | sleeping`. `Fly.update` routes
+three ways: `flying` → `updateFlight` only, so brain signals reach the **wings**
+(`brainLive`/`liveArousal`/`liveWing` → `effortCurrent`) but never the
+trajectory — flight is ballistic from `startFlight` to the flare; grounded with
+signals → `brainBehavior`; grounded without signals → the legacy
+mouse-distance path (`SCARE_RADIUS`/`NERVOUS_RADIUS`, extra flies only).
+
+Inside `brainBehavior` the order is load-bearing: `escape` is tested first and
+interrupts even sleep; `sleep` then returns early, so nothing else can fire
+while asleep (waking always routes through `.grooming`). Ledge attachment lives
+in `updateWalk`, and `heading += turnBias·dt` is suppressed while on a ledge.
 
 ## Neuron → behavior mapping (current)
 
@@ -113,6 +241,9 @@ distance-based behavior (`signals: nil` path).
   CC BY-NC 4.0 (FlyWire terms) — keep the license split intact.
 - README numeric claims (neuron/edge/synapse counts, latencies) must match
   `data/*.json` and suite output — reviewers falsify them against the data.
+  Current truth (checkable without a Mac):
+  `python -c "import json;c=json.load(open('data/circuit.json'));print(len(c['neurons']),len(c['edges']))"`
+  → 668 neurons, 18,968 edges (~203k synapses), 23,210 brain points.
 - `.gitignore` covers the binary, logs, and root-level PNGs (diagnostics
   outputs); intentional images live in `assets/`.
 - Local folder is `fly-brain`; the remote is `desktop-fly` — harmless.
