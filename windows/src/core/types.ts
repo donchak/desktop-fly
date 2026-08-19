@@ -25,5 +25,7 @@ export interface Ledge {
   readonly y: number;
   readonly x0: number;
   readonly x1: number;
-  readonly id: number;
+  // The source window's HWND as a decimal string (see core/windowTerrain.ts's
+  // handleId): compared for equality only, so no numeric precision is involved.
+  readonly id: string;
 }

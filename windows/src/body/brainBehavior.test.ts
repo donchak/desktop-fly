@@ -125,7 +125,7 @@ test('turnBias steers while walking but not while on a ledge', () => {
   onLedge.state = asFlyState('walking');
   onLedge.speed = 30;
   onLedge.heading = 0;
-  onLedge.terrain = [{ y: -40, x0: -300, x1: 300, id: 1 }];
+  onLedge.terrain = [{ y: -40, x0: -300, x1: 300, id: '1' }];
   onLedge.ledge = onLedge.terrain[0];
   for (let i = 0; i < 30; i++) onLedge.update(DT, BOUNDS, null, s);
   assert.ok(Math.abs(onLedge.heading) < 0.25,

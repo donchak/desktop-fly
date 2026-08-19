@@ -8,8 +8,19 @@
 
 import type { Ledge } from './types.ts';
 
+// HWNDs are pointer-sized, and koffi.address() is declared `number | bigint`.
+// Number() would silently lose precision above 2^53-1 and could collapse two
+// distinct windows onto one id — which would break the "stable across polls"
+// property everything here depends on. Window ids are only ever compared for
+// equality (never ordered, never arithmetic), so a string carries them exactly,
+// at any width, and survives IPC and JSON unchanged. bigint would too, except it
+// does not survive JSON, which the logs and tests rely on.
+export function handleId(address: number | bigint): string {
+  return address.toString();
+}
+
 export interface RawWindow {
-  id: number;          // HWND, as a number
+  id: string;          // the HWND, as a decimal string — see handleId
   x: number;           // screen DIPs, origin top-left of the primary display
   y: number;           // y DOWN
   width: number;
@@ -41,7 +52,7 @@ const MIN_SPAN = 100;       // narrower than this is not worth walking
 const MAX_LEDGES = 12;
 
 export class WindowTerrain {
-  private knownIds = new Set<number>();
+  private knownIds = new Set<string>();
   private first = true;
 
   poll(windows: RawWindow[], display: DisplayRect): TerrainSnapshot {
@@ -52,7 +63,7 @@ export class WindowTerrain {
 
     const ledges: Ledge[] = [];
     const newWindows: TerrainSnapshot['newWindows'] = [];
-    const ids = new Set<number>();
+    const ids = new Set<string>();
 
     for (const w of windows) {
       // Visibility filters: these decide whether the window exists at all, for

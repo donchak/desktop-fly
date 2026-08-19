@@ -10,7 +10,7 @@
 // returns nil (Environment.swift:27-30).
 
 import koffiRaw from 'koffi';
-import type { RawWindow } from '../core/windowTerrain.ts';
+import { handleId, type RawWindow } from '../core/windowTerrain.ts';
 import type { ScreenRect } from '../core/arena.ts';
 
 // koffi 3.1 ships an incomplete index.d.ts: `proto`, `register`, `unregister`
@@ -233,8 +233,9 @@ export function enumerateWindows(scale = 1): RawWindow[] {
           // The HWND itself, so the id is STABLE across polls. An array index
           // would change as windows open and close, making every poll report
           // every window as newly appeared (and breaking ledge tracking, which
-          // matches a walked-on ledge to its window by id).
-          id: Number(koffi.address(hwnd)),
+          // matches a walked-on ledge to its window by id). handleId keeps the
+          // full pointer width: Number() would lose precision above 2^53-1.
+          id: handleId(koffi.address(hwnd)),
           x: Math.round(rect.left / scale),
           y: Math.round(rect.top / scale),
           width: Math.round((rect.right - rect.left) / scale),

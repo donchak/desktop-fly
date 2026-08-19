@@ -78,8 +78,10 @@ subtree is the Electron/TypeScript port and IS verifiable here:
   never with `-`: plain subtraction goes negative across a wrap, which clamped
   idle to 0 (so a machine idle across the wrap never slept) and made the first
   input after a wrap look like no input at all.
-- Window ids must be **HWNDs**: with array indices every poll reports every
-  window as newly appeared, and ledge tracking breaks.
+- Window ids must be **HWNDs, carried as strings**: with array indices every poll
+  reports every window as newly appeared, and `Number(koffi.address(hwnd))` would
+  lose precision above 2^53-1 (real HWNDs are 32-bit significant, so that is
+  latent, not live). Ids are equality-only, so `handleId()` keeps them exact.
 - Both windows must share one always-on-top band, or the full-screen overlay pins
   the brain window beneath it. This machine has 31 topmost windows, so ordering
   inside the band drifts; always-on-top is re-asserted on the window poll because

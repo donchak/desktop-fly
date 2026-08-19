@@ -19,7 +19,7 @@ test('the fly attaches to a window edge and follows it', () => {
   fly.state = asFlyState('walking');
   fly.speed = 30;
   fly.heading = 0;
-  fly.terrain = [{ y: -40, x0: -300, x1: 300, id: 1 }];
+  fly.terrain = [{ y: -40, x0: -300, x1: 300, id: '1' }];
   let attached = false;
   for (let i = 0; i < 240; i++) {
     fly.update(DT, BOUNDS, null, walkSignals());
@@ -37,7 +37,7 @@ test('a window closing underfoot launches a flight', () => {
   fly.state = asFlyState('walking');
   fly.speed = 25;
   fly.heading = 0;
-  const L: Ledge = { y: -40, x0: -300, x1: 300, id: 1 };
+  const L: Ledge = { y: -40, x0: -300, x1: 300, id: '1' };
   fly.terrain = [L];
   fly.ledge = L;
   fly.terrain = [];                 // the window vanished
@@ -57,7 +57,7 @@ test('walking along a ledge stays within its x range', () => {
   fly.state = asFlyState('walking');
   fly.speed = 120;
   fly.heading = 0;
-  const L: Ledge = { y: -40, x0: -100, x1: 100, id: 7 };
+  const L: Ledge = { y: -40, x0: -100, x1: 100, id: '7' };
   fly.terrain = [L];
   fly.ledge = L;
   for (let i = 0; i < 600; i++) {
@@ -73,10 +73,10 @@ test('a dragged window carries the fly with it', () => {
   fly.state = asFlyState('walking');
   fly.speed = 10;
   fly.heading = 0;
-  fly.terrain = [{ y: -40, x0: -300, x1: 300, id: 3 }];
+  fly.terrain = [{ y: -40, x0: -300, x1: 300, id: '3' }];
   fly.ledge = fly.terrain[0];
   // same window id, moved up 30 pt (within the 40 pt tolerance)
-  fly.terrain = [{ y: -10, x0: -300, x1: 300, id: 3 }];
+  fly.terrain = [{ y: -10, x0: -300, x1: 300, id: '3' }];
   for (let i = 0; i < 60; i++) fly.update(DT, BOUNDS, null, walkSignals());
   assert.equal(fly.state, 'walking');
   assert.ok(Math.abs(fly.pos.y + 10) < 8, `y ${fly.pos.y} did not follow to -10`);

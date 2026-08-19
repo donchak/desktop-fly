@@ -123,7 +123,7 @@ bodyCheck('ledge attach + follow window edge', () => {
   fly.state = asFlyState('walking');
   fly.speed = 30;
   fly.heading = 0;
-  fly.terrain = [{ y: -40, x0: -300, x1: 300, id: 1 }];
+  fly.terrain = [{ y: -40, x0: -300, x1: 300, id: '1' }];
   for (let i = 0; i < 240; i++) {
     fly.update(DT, BOUNDS, null, walkSignals());
     if (fly.ledge !== null && Math.abs(fly.pos.y + 40) < 8) {
@@ -139,7 +139,7 @@ bodyCheck('window closes underfoot -> takeoff', () => {
   fly.state = asFlyState('walking');
   fly.speed = 25;
   fly.heading = 0;
-  const L: Ledge = { y: -40, x0: -300, x1: 300, id: 1 };
+  const L: Ledge = { y: -40, x0: -300, x1: 300, id: '1' };
   fly.terrain = [L];
   fly.ledge = L;
   fly.terrain = [];

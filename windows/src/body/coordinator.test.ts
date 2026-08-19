@@ -122,7 +122,7 @@ test('gait proprioception feeds back into the sim while walking', () => {
 
 test('terrain reaches the flies', () => {
   const c = makeCoordinator();
-  c.setSenses({ ledges: [{ y: -40, x0: -300, x1: 300, id: 1 }] });
+  c.setSenses({ ledges: [{ y: -40, x0: -300, x1: 300, id: '1' }] });
   c.frame(DT);
   assert.equal(c.flies[0].terrain.length, 1);
 });
@@ -161,7 +161,7 @@ test('a nearby tap reaches the sensory pathway; a distant one does not', () => {
 test('retarget clamps flies into the new display and clears terrain', () => {
   const c = makeCoordinator();
   c.flies[0].pos = { x: 700, y: 450 };
-  c.setSenses({ ledges: [{ y: -40, x0: -300, x1: 300, id: 1 }] });
+  c.setSenses({ ledges: [{ y: -40, x0: -300, x1: 300, id: '1' }] });
   c.frame(DT);
   c.retarget({ width: 800, height: 600 });
   // frame(0) drains the enqueued retarget without advancing the fly — a normal

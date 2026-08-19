@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { WindowTerrain, type RawWindow } from './windowTerrain.ts';
+import { handleId, WindowTerrain, type RawWindow } from './windowTerrain.ts';
 
 // A 1920x1080 primary display at the origin: scene centre is screen (960, 540).
 const DISPLAY = { x: 0, y: 0, width: 1920, height: 1080 };
 
 function win(over: Partial<RawWindow> = {}): RawWindow {
   return {
-    id: 1, x: 400, y: 300, width: 800, height: 600,
+    id: '1', x: 400, y: 300, width: 800, height: 600,
     visible: true, toolWindow: false, cloaked: false,
     hasTitle: true, ownProcess: false, ...over,
   };
@@ -23,7 +23,7 @@ test('a normal window top edge becomes a ledge in scene coordinates', () => {
   // x 400..1200 in screen space is -560..240 relative to centre 960
   assert.equal(L.x0, -560);
   assert.equal(L.x1, 240);
-  assert.equal(L.id, 1);
+  assert.equal(L.id, '1');
 });
 
 test('windows that must be ignored are ignored', () => {
@@ -81,7 +81,7 @@ test('a ledge narrower than 100 pt is not walkable', () => {
 test('at most 12 ledges are reported', () => {
   const t = new WindowTerrain();
   const many = Array.from({ length: 30 },
-    (_, i) => win({ id: i + 1, y: 200 + i * 10 }));
+    (_, i) => win({ id: String(i + 1), y: 200 + i * 10 }));
   assert.equal(t.poll(many, DISPLAY).ledges.length, 12);
 });
 
@@ -89,9 +89,9 @@ test('the first poll reports no new windows, later polls do', () => {
   const t = new WindowTerrain();
   // Environment.swift:58 — the first poll must not treat every existing window
   // as having just appeared, or the fly panics the moment it starts.
-  assert.equal(t.poll([win({ id: 1 })], DISPLAY).newWindows.length, 0);
-  assert.equal(t.poll([win({ id: 1 })], DISPLAY).newWindows.length, 0);
-  const appeared = t.poll([win({ id: 1 }), win({ id: 2 })], DISPLAY);
+  assert.equal(t.poll([win({ id: '1' })], DISPLAY).newWindows.length, 0);
+  assert.equal(t.poll([win({ id: '1' })], DISPLAY).newWindows.length, 0);
+  const appeared = t.poll([win({ id: '1' }), win({ id: '2' })], DISPLAY);
   assert.equal(appeared.newWindows.length, 1);
   // centre in scene coordinates, and size = the longer edge
   assert.equal(appeared.newWindows[0].center.x, 400 + 400 - 960);
@@ -101,19 +101,58 @@ test('the first poll reports no new windows, later polls do', () => {
 
 test('a window that closes and reopens counts as new again', () => {
   const t = new WindowTerrain();
-  t.poll([win({ id: 1 }), win({ id: 2 })], DISPLAY);
-  t.poll([win({ id: 1 })], DISPLAY);                    // 2 closed
-  const back = t.poll([win({ id: 1 }), win({ id: 2 })], DISPLAY);
+  t.poll([win({ id: '1' }), win({ id: '2' })], DISPLAY);
+  t.poll([win({ id: '1' })], DISPLAY);                    // 2 closed
+  const back = t.poll([win({ id: '1' }), win({ id: '2' })], DISPLAY);
   assert.equal(back.newWindows.length, 1);
 });
 
 test('new windows are reported even when they are not walkable', () => {
   // A small dialog cannot be stood on, but it still looms.
   const t = new WindowTerrain();
-  t.poll([win({ id: 1 })], DISPLAY);
+  t.poll([win({ id: '1' })], DISPLAY);
   // 120x90 is under the 160x60 minimum, so it can never be a ledge
-  const snap = t.poll([win({ id: 1 }), win({ id: 9, width: 120, height: 90 })],
+  const snap = t.poll([win({ id: '1' }), win({ id: '9', width: 120, height: 90 })],
     DISPLAY);
-  assert.equal(snap.ledges.filter((l) => l.id === 9).length, 0);
+  assert.equal(snap.ledges.filter((l) => l.id === '9').length, 0);
   assert.equal(snap.newWindows.length, 1);
+});
+
+// --- window identity -------------------------------------------------------
+// HWNDs are pointer-sized, and koffi.address() is declared `number | bigint`.
+// Converting a bigint address through Number() silently loses precision above
+// 2^53-1, which could collapse two distinct windows onto one id and break the
+// "stable across polls" property this module depends on. Reported in review.
+//
+// Real HWNDs are 32-bit significant on Windows (measured max here: 59,645,094),
+// so this is latent rather than live — but ids are only ever compared for
+// equality, so carrying them as strings removes the assumption entirely.
+test('handleId keeps pointer addresses that Number() would collapse distinct', () => {
+  const a = 2n ** 53n;          // 9007199254740992
+  const b = 2n ** 53n + 1n;     // 9007199254740993
+  assert.equal(Number(a), Number(b), 'precondition: these collide as numbers');
+  assert.notEqual(handleId(a), handleId(b));
+  // ordinary small handles round-trip readably
+  assert.equal(handleId(59645094), '59645094');
+  assert.equal(handleId(0n), '0');
+});
+
+test('two windows with addresses that collide as numbers stay separate', () => {
+  const t = new WindowTerrain();
+  const a = win({ id: handleId(2n ** 53n) });
+  const b = win({ id: handleId(2n ** 53n + 1n), x: 100 });
+  t.poll([a, b], DISPLAY);                          // first poll: nothing is new
+  assert.equal(t.poll([a, b], DISPLAY).newWindows.length, 0);
+  // close one and reopen it: exactly one window should register as new
+  t.poll([a], DISPLAY);
+  assert.equal(t.poll([a, b], DISPLAY).newWindows.length, 1);
+});
+
+test('a ledge keeps the id of the window it came from', () => {
+  const t = new WindowTerrain();
+  const id = handleId(2n ** 53n + 1n);
+  const snap = t.poll([win({ id })], DISPLAY);
+  assert.equal(snap.ledges.length, 1);
+  assert.equal(snap.ledges[0].id, id,
+    'Fly.updateWalk re-finds its ledge by this id every frame');
 });
